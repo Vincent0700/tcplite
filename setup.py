@@ -16,7 +16,7 @@ setup(
     license='MIT License',
     packages=find_packages(),
     platforms=['all'],
-    url='',
+    url='https://github.com/Vincent0700/tcplite.git',
     install_requires=[
         'attrs==18.2.0'
     ]
