@@ -1,0 +1,9 @@
+.DS_Store
+
+.vscode/
+.idea/
+
+venv/
+build/
+dist/
+tcplite.egg-info/
