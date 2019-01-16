@@ -10,3 +10,4 @@ tcplite.egg-info/
 
 __pycache__
 *.pyc
+.pypirc
