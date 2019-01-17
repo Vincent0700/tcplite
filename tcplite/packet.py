@@ -4,14 +4,31 @@ __author__ = 'wang.yuanqiu007@gmail.com'
 import pickle
 import json
 import attr
-from attr.validators import instance_of
+import socket
+import threading
+from attr.validators import instance_of, optional
 from enum import Enum
-from .error import PacketParseError
 
+# The bytes at the end of the packet
 EOF = b'\xFF\xFF\x00\x00'
 
 
+class PacketParseError(Exception):
+    def __init__(self, error):
+        super().__init__(self, error)
+
+    def __str__(self):
+        return f'Packet parse error: {self.error}'
+
+
 class EventType(Enum):
+    """
+    Packet route type
+
+    Attributes:
+        DIRECT_MSG: Indicate the packet is send to a direct socket.
+        BROADCAST: Send to all the sockets except itself.
+    """
     DIRECT_MSG = b'\x01'
     BROADCAST = b'\x02'
 
@@ -25,8 +42,13 @@ class EventType(Enum):
 
 
 class DataType(Enum):
+    """
+    Packet data type
+
+
+    """
     RAW = b'\x01'  # raw data, no need to decode
-    PICKLED = b'\x02'  # bytes -> object
+    PICKLED = b'\x02'  # bytes -> python object
     STRING = b'\x03'  # bytes -> str
     JSON = b'\x04'  # bytes -> str -> dict
 
@@ -40,7 +62,7 @@ class DataType(Enum):
             return DataType.STRING
         elif val == int(DataType.JSON.value.hex()):
             return DataType.JSON
-        raise PacketParseError('Data type is not legal.')
+        raise PacketParseError(f'Unexpected datatype {str(val)}')
 
 
 @attr.s
@@ -48,6 +70,13 @@ class Packet:
     event_type = attr.ib(type=EventType, validator=instance_of(EventType))  # required
     data_type = attr.ib(type=EventType, validator=instance_of(DataType))  # required
     data = attr.ib(default=None)
+
+    class PacketParseError(Exception):
+        def __init__(self, error):
+            super().__init__(self, error)
+
+        def __str__(self):
+            return f'Packet parse error: {self.error}'
 
     def encode(self) -> attr.ib(type=bytes, validator=instance_of(bytes)):
         if self.data_type == DataType.RAW:
@@ -67,7 +96,7 @@ class Packet:
         raw=attr.ib(type=bytes, validator=instance_of(bytes))
     ):
         if len(raw) < 2:
-            raise PacketParseError(f'Packet given is not incomplete.')
+            raise PacketParseError(f'The packet is illegal.')
         event_type = EventType.from_int(raw[0])
         data_type = DataType.from_int(raw[1])
         raw_data = raw[2:]
@@ -80,9 +109,53 @@ class Packet:
         elif data_type == DataType.JSON:
             data = json.loads(raw_data.decode('utf-8'))
         else:
-            raise PacketParseError('Do not know how to decode.')
+            raise PacketParseError(f'Cannot decode datatype {data_type.value}.')
         return Packet(
             event_type=event_type,
             data_type=data_type,
             data=data
         )
+
+
+@attr.s(init=True)
+class PacketReceiver:
+    """
+    The class continuously read buffer from socket.
+
+    Attributes:
+        sock: The socket we receive buffer from. Required.
+        handler: The packet message handler. Default to None.
+        chunk_size: The length of bytes we read at one time. Deafult to 1024.
+        eof: The bytes at the end of packet buffer. Default to packet default eof.
+        thread: The thread of reading handler. Default to None.
+        is_alive: Bool indicates whether reading thread is alive. Default to True.
+    """
+    sock = attr.ib(type=socket.socket, validator=instance_of(socket.socket))
+    handler = attr.ib(default=None)
+    chunk_size = attr.ib(type=int, validator=instance_of(int), default=1024)
+    eof = attr.ib(type=bytes, validator=instance_of(bytes), default=EOF)
+    is_alive = attr.ib(type=bool, validator=instance_of(bool), default=True)
+    thread = attr.ib(type=threading.Thread, default=None,
+                     validator=optional([instance_of(threading.Thread), instance_of(None)]))
+
+    def start_listen(self):
+        self.is_alive = True
+        self.thread = threading.Thread(target=self.reading)
+        self.thread.start()
+
+    def close(self):
+        self.is_alive = False
+
+    def reading(self):
+        buffer = b''
+        while self.is_alive:
+            try:
+                data = self.sock.recv(self.chunk_size)
+                buffer += data
+                arr = buffer.split(self.eof)
+                arr_len = len(arr)
+                for i in range(arr_len - 1):
+                    self.handler(arr[i], self.sock)
+                buffer = arr[-1] if arr[-1] else b''
+            except ConnectionError as e:
+                pass
