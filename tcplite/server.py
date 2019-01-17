@@ -36,14 +36,12 @@ class TCPServer(object):
     @attr.s(init=True)
     class ClientInfo(object):
         """
-        class TCPServer.ClientInfo
-
         Client information dataclass
 
         Attributes:
-            socket: client socket
+            socket: The socket for client
             addr: The tuple (ip, port) of the client
-            is_alive: end the socket loop if the value is false.
+            is_alive: The boolean indicate whether client is running.
         """
         socket = attr.ib(type=socket.socket, validator=instance_of(socket.socket))  # required
         addr = attr.ib(type=tuple, validator=instance_of(tuple))  # required
@@ -56,6 +54,10 @@ class TCPServer(object):
 
     def start(self):
         self.sock_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # reducing the "address already in use" error.
+        # SO_REUSEADDR option allows a process to bind to a port which remains in TIME_WAIT
+        # (it still only allows a single process to be bound to that port)
+        self.sock_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock_server.bind((self.host, self.port))
         self.sock_server.listen(self.backlog)
         self.is_alive = True
